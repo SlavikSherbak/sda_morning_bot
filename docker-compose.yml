@@ -2,9 +2,6 @@
 version: '3.8'
 
 services:
-  #
-  # PostgreSQL Database
-  #
   postgres:
     image: postgres:15-alpine
     container_name: sda_bot_postgres
@@ -26,9 +23,6 @@ services:
     networks:
       - sda_bot_network
 
-  #
-  # Redis Cache & Message Broker
-  #
   redis:
     image: redis:7-alpine
     container_name: sda_bot_redis
@@ -47,13 +41,11 @@ services:
     networks:
       - sda_bot_network
 
-  #
-  # Django Application Server
-  #
   app:
     build:
       context: .
       dockerfile: docker/Dockerfile
+    image: sda_morning_bot-app
     container_name: sda_bot_app
     environment:
       PYTHONUNBUFFERED: 1
@@ -86,20 +78,12 @@ services:
     restart: unless-stopped
     networks:
       - sda_bot_network
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/admin/"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 60s
 
-  #
-  # Celery Worker
-  #
   celery-worker:
     build:
       context: .
       dockerfile: docker/Dockerfile
+    image: sda_morning_bot-celery-worker
     container_name: sda_bot_celery_worker
     environment:
       C_FORCE_ROOT: 1
@@ -111,7 +95,7 @@ services:
       redis:
         condition: service_healthy
       app:
-        condition: service_healthy
+        condition: service_started
     volumes:
       - .:/app
       - ./docker/config:/config
@@ -123,13 +107,11 @@ services:
     networks:
       - sda_bot_network
 
-  #
-  # Celery Beat (Scheduler)
-  #
   celery-beat:
     build:
       context: .
       dockerfile: docker/Dockerfile
+    image: sda_morning_bot-celery-beat
     container_name: sda_bot_celery_beat
     environment:
       C_FORCE_ROOT: 1
@@ -141,7 +123,7 @@ services:
       redis:
         condition: service_healthy
       app:
-        condition: service_healthy
+        condition: service_started
     volumes:
       - .:/app
       - ./docker/config:/config
@@ -154,13 +136,11 @@ services:
     networks:
       - sda_bot_network
 
-  #
-  # Telegram Bot
-  #
   bot:
     build:
       context: .
       dockerfile: docker/Dockerfile
+    image: sda_morning_bot-bot
     container_name: sda_bot_telegram
     environment:
       PYTHONUNBUFFERED: 1
@@ -171,7 +151,7 @@ services:
       redis:
         condition: service_healthy
       app:
-        condition: service_healthy
+        condition: service_started
     volumes:
       - .:/app
       - ./docker/config:/config
