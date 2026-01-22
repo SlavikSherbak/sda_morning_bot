@@ -64,37 +64,70 @@ TEMPLATES = [
 WSGI_APPLICATION = "config.wsgi.application"
 
 # Database
-# Використовуємо PostgreSQL в Docker, SQLite для локальної розробки без Docker
-DATABASE_URL = os.getenv("DATABASE_URL", "")
-if DATABASE_URL:
-    # PostgreSQL з DATABASE_URL
-    import dj_database_url
+
+db_host = os.getenv("DB_HOST") or os.getenv("DATABASE_HOST", "")
+db_name = (
+    os.getenv("DB_DATABASE")
+    or os.getenv("DB_NAME")
+    or os.getenv("DATABASE_NAME", "")
+)
+db_user = os.getenv("DB_USER") or os.getenv("DATABASE_USER", "")
+db_password = os.getenv("DB_PASSWORD") or os.getenv("DATABASE_PASSWORD", "")
+db_port = os.getenv("DB_PORT") or os.getenv("DATABASE_PORT", "5432")
+
+def is_valid_db_value(value):
+    if not value:
+        return False
+    if value.strip() == "://" or value.strip().startswith("://"):
+        return False
+    return True
+
+# Перевіряємо наявність значень (зашифровані DigitalOcean значення EV[1:...] також вважаються валідними)
+# і що вони не є явно неправильними (наприклад, "://")
+if db_host and db_name and db_user and is_valid_db_value(db_host) and is_valid_db_value(db_name) and is_valid_db_value(db_user):
     DATABASES = {
-        "default": dj_database_url.parse(DATABASE_URL)
+        "default": {
+            "ENGINE": "django.db.backends.postgresql",
+            "NAME": db_name,
+            "USER": db_user,
+            "PASSWORD": db_password,
+            "HOST": db_host,
+            "PORT": db_port,
+        }
     }
 else:
-    # Перевіряємо чи є змінні для PostgreSQL (для Docker)
-    db_engine = os.getenv("DATABASE_ENGINE", "")
-    db_host = os.getenv("DATABASE_HOST", "")
-    if db_engine == "postgresql" or db_host:
-        DATABASES = {
-            "default": {
-                "ENGINE": "django.db.backends.postgresql",
-                "NAME": os.getenv("DATABASE_NAME", "asd_morning_bot"),
-                "USER": os.getenv("DATABASE_USER", "postgres"),
-                "PASSWORD": os.getenv("DATABASE_PASSWORD", "postgres"),
-                "HOST": db_host or "postgres",
-                "PORT": os.getenv("DATABASE_PORT", "5432"),
-            }
-        }
+    _url = os.getenv("DATABASE_URL", "")
+    if _url and _url.strip() != "://" and not _url.startswith("EV[") and not _url.strip().startswith("://") and _url.startswith(("postgres://", "postgresql://", "pgsql://")):
+        import dj_database_url
+        try:
+            DATABASES = {"default": dj_database_url.parse(_url)}
+        except Exception as e:
+            from django.core.exceptions import ImproperlyConfigured
+            raise ImproperlyConfigured(
+                f"Invalid DATABASE_URL: {e}. Use DB_HOST, DB_USER, DB_PASSWORD, "
+                "DB_DATABASE, DB_PORT instead (e.g. on DigitalOcean App Platform)."
+            ) from e
     else:
-        # SQLite3 для локальної розробки
-        DATABASES = {
-            "default": {
-                "ENGINE": "django.db.backends.sqlite3",
-                "NAME": BASE_DIR / "db.sqlite3",
+        db_engine = os.getenv("DATABASE_ENGINE", "")
+        if db_engine or db_name or db_user or db_host:
+            DATABASES = {
+                "default": {
+                    "ENGINE": "django.db.backends.postgresql",
+                    "NAME": db_name or os.getenv("DATABASE_NAME", "asd_morning_bot"),
+                    "USER": db_user or os.getenv("DATABASE_USER", "postgres"),
+                    "PASSWORD": db_password or os.getenv("DATABASE_PASSWORD", ""),
+                    "HOST": db_host or os.getenv("DATABASE_HOST", "localhost"),
+                    "PORT": db_port or os.getenv("DATABASE_PORT", "5432"),
+                }
             }
-        }
+        else:
+            # Fallback до SQLite
+            DATABASES = {
+                "default": {
+                    "ENGINE": "django.db.backends.sqlite3",
+                    "NAME": BASE_DIR / "db.sqlite3",
+                }
+            }
 
 # Password validation
 AUTH_PASSWORD_VALIDATORS = [
@@ -133,15 +166,21 @@ GRAPPELLI_ADMIN_TITLE = "ASD Morning Bot Admin"
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 # Celery Configuration
-# Використовуємо Redis з Docker compose (сервіс redis) або локальний Redis
-# Якщо CELERY_BROKER_URL не встановлено, використовуємо REDIS_HOST (для Docker це "redis")
-REDIS_HOST = os.getenv("REDIS_HOST", "redis")
-REDIS_PORT = os.getenv("REDIS_PORT", "6379")
-REDIS_DB = os.getenv("REDIS_DB", "0")
-# Формуємо URL на основі REDIS_HOST якщо CELERY_BROKER_URL не вказано явно
-_default_redis_url = f"redis://{REDIS_HOST}:{REDIS_PORT}/{REDIS_DB}"
-CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL") or _default_redis_url
-CELERY_RESULT_BACKEND = os.getenv("CELERY_RESULT_BACKEND") or _default_redis_url
+# REDIS_URL (App Platform) або CELERY_BROKER_URL / REDIS_HOST (Docker)
+_redis_url = os.getenv("REDIS_URL", "")
+if _redis_url:
+    CELERY_BROKER_URL = _redis_url
+    CELERY_RESULT_BACKEND = _redis_url
+elif os.getenv("CELERY_BROKER_URL"):
+    CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL")
+    CELERY_RESULT_BACKEND = os.getenv("CELERY_RESULT_BACKEND") or CELERY_BROKER_URL
+else:
+    _h = os.getenv("REDIS_HOST", "redis")
+    _p = os.getenv("REDIS_PORT", "6379")
+    _d = os.getenv("REDIS_DB", "0")
+    _default = f"redis://{_h}:{_p}/{_d}"
+    CELERY_BROKER_URL = _default
+    CELERY_RESULT_BACKEND = _default
 CELERY_ACCEPT_CONTENT = ["json"]
 CELERY_TASK_SERIALIZER = "json"
 CELERY_RESULT_SERIALIZER = "json"
