@@ -155,6 +155,12 @@ class UserSettings(models.Model):
         related_name="user_settings",
         verbose_name="Selected book"
     )
+    selected_books = models.ManyToManyField(
+        Book,
+        blank=True,
+        related_name="user_settings_multi",
+        verbose_name="Selected books"
+    )
     is_active = models.BooleanField(default=True, verbose_name="Active")
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="Created at")
     updated_at = models.DateTimeField(auto_now=True, verbose_name="Updated at")

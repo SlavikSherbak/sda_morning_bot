@@ -88,11 +88,16 @@ def send_inspirations_to_users():
     logger.info("-" * 80)
     
     # Отримуємо всіх активних користувачів з налаштуваннями
+    from django.db.models import Q, Count
+    
     active_settings = UserSettings.objects.filter(
         is_active=True,
         telegram_user__is_active=True,
-        selected_book__isnull=False,
-    ).select_related("telegram_user", "selected_book")
+    ).annotate(
+        books_count=Count("selected_books")
+    ).filter(
+        Q(selected_book__isnull=False) | Q(books_count__gt=0)
+    ).select_related("telegram_user", "selected_book").prefetch_related("selected_books")
     
     total_users = active_settings.count()
     logger.info(f"📊 Знайдено активних користувачів з налаштуваннями: {total_users}")
@@ -181,64 +186,84 @@ def send_inspirations_to_users():
         users_in_window += 1
         logger.info(f"   ✅ Час нотифікації У ВІКНІ! Шукаємо натхнення...")
         
-        # Шукаємо натхнення на сьогодні
-        selected_book = settings_obj.selected_book
-        logger.info(f"   📖 Вибрана книга: {selected_book.title} (ID: {selected_book.id})")
-        logger.info(f"   🔍 Шукаємо натхнення для дати: {user_current_date}")
+        selected_books_list = list(settings_obj.selected_books.all())
         
-        inspiration = DailyInspiration.objects.filter(
-            book=selected_book,
-            date=user_current_date,
-        ).first()
+        if not selected_books_list and settings_obj.selected_book:
+            selected_books_list = [settings_obj.selected_book]
+            logger.info(f"   📚 Використовується fallback: 1 книга з поля selected_book")
         
-        if not inspiration:
+        if not selected_books_list:
             users_no_inspiration += 1
-            logger.error(
-                f"   ❌ Натхнення НЕ ЗНАЙДЕНО для книги '{selected_book.title}' "
-                f"на дату {user_current_date}!"
-            )
-            logger.error(
-                f"   💡 Можливі причини:"
-                f"\n      - Натхнення не було створено для цієї дати"
-                f"\n      - Книга не була спарсена"
-                f"\n      - Помилка при парсингу книги"
-            )
+            logger.error(f"   ❌ У користувача немає обраних книг!")
             continue
         
-        logger.info(f"   ✅ Натхнення знайдено! ID: {inspiration.id}")
-        logger.info(f"   📝 Превью: {inspiration.original_text[:100]}...")
+        logger.info(f"   📚 Кількість обраних книг: {len(selected_books_list)}")
         
-        # Перевіряємо чи вже було надіслано
         language = settings_obj.language
         logger.info(f"   🌐 Мова користувача: {language}")
         
-        was_sent = _was_inspiration_sent_today(
-            telegram_user,
-            inspiration,
-            language
-        )
-        
-        if was_sent:
-            users_already_sent += 1
-            logger.warning(
-                f"   ⚠️ Натхнення вже було надіслано користувачу сьогодні, пропускаємо"
+        inspirations_to_send = []
+        for selected_book in selected_books_list:
+            logger.info(f"   📖 Обробка книги: {selected_book.title} (ID: {selected_book.id})")
+            logger.info(f"   🔍 Шукаємо натхнення для дати: {user_current_date}")
+            
+            inspiration = DailyInspiration.objects.filter(
+                book=selected_book,
+                date=user_current_date,
+            ).first()
+            
+            if not inspiration:
+                logger.error(
+                    f"   ❌ Натхнення НЕ ЗНАЙДЕНО для книги '{selected_book.title}' "
+                    f"на дату {user_current_date}!"
+                )
+                logger.error(
+                    f"   💡 Можливі причини:"
+                    f"\n      - Натхнення не було створено для цієї дати"
+                    f"\n      - Книга не була спарсена"
+                    f"\n      - Помилка при парсингу книги"
+                )
+                continue
+            
+            logger.info(f"   ✅ Натхнення знайдено! ID: {inspiration.id}")
+            logger.info(f"   📝 Превью: {inspiration.original_text[:100]}...")
+            
+            was_sent = _was_inspiration_sent_today(
+                telegram_user,
+                inspiration,
+                language
             )
+            
+            if was_sent:
+                logger.warning(
+                    f"   ⚠️ Натхнення з книги '{selected_book.title}' вже було надіслано, пропускаємо"
+                )
+                continue
+            
+            inspirations_to_send.append(inspiration)
+        
+        if not inspirations_to_send:
+            if len(selected_books_list) > 0:
+                users_already_sent += 1
+                logger.warning(f"   ⚠️ Всі натхнення вже були надіслані користувачу")
+            else:
+                users_no_inspiration += 1
             continue
         
-        # Відправляємо натхнення
-        users_scheduled += 1
-        logger.info(f"   🚀 Планується відправка натхнення користувачу!")
-        logger.info(f"   📤 Викликаємо задачу send_inspiration_to_user...")
-        
-        try:
-            send_inspiration_to_user.delay(
-                telegram_id,
-                inspiration.id,
-                language,
-            )
-            logger.info(f"   ✅ Задачу успішно заплановано в чергу Celery")
-        except Exception as e:
-            logger.error(f"   ❌ Помилка при плануванні задачі: {e}", exc_info=True)
+        for inspiration in inspirations_to_send:
+            users_scheduled += 1
+            logger.info(f"   🚀 Планується відправка натхнення з книги '{inspiration.book.title}'!")
+            logger.info(f"   📤 Викликаємо задачу send_inspiration_to_user...")
+            
+            try:
+                send_inspiration_to_user.delay(
+                    telegram_id,
+                    inspiration.id,
+                    language,
+                )
+                logger.info(f"   ✅ Задачу успішно заплановано в чергу Celery")
+            except Exception as e:
+                logger.error(f"   ❌ Помилка при плануванні задачі: {e}", exc_info=True)
     
     # Підсумок виконання
     logger.info("=" * 80)

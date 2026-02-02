@@ -54,7 +54,7 @@ async def cmd_settings(message: Message):
             
             detected_tz = detect_timezone_from_language_code(user_language_code) if user_language_code else detect_timezone_from_language_code("uk")
             
-            settings, created = UserSettings.objects.select_related('selected_book').get_or_create(
+            settings, created = UserSettings.objects.select_related('selected_book').prefetch_related('selected_books').get_or_create(
                 telegram_user=tg_user,
                 defaults={
                     "notification_time": time(8, 0),
@@ -75,11 +75,19 @@ async def cmd_settings(message: Message):
                     timezone_str = str(settings.timezone)
             else:
                 timezone_str = "Europe/Kyiv"
-            book_title = settings.selected_book.title if settings.selected_book else t(language, "not_specified")
+            
+            selected_books = list(settings.selected_books.all())
+            if selected_books:
+                book_titles = "\n".join([f"📖 {book.title}" for book in selected_books])
+            elif settings.selected_book:
+                book_titles = f"📖 {settings.selected_book.title}"
+            else:
+                book_titles = t(language, "not_specified")
+            
             language_display = dict(LANGUAGE_CHOICES)[settings.language]
             status = t(language, "active") if settings.is_active else t(language, "inactive")
             
-            return notification_time_str, timezone_str, book_title, language_display, status
+            return notification_time_str, timezone_str, book_titles, language_display, status
         
         telegram_user = await sync_to_async(TelegramUser.objects.get)(telegram_id=message.from_user.id)
         notification_time_str, timezone_str, book_title, language_display, status = await sync_to_async(get_settings_data)(telegram_user, language_code)
@@ -114,7 +122,7 @@ async def cmd_settings_button(message: Message):
             
             detected_tz = detect_timezone_from_language_code(user_language_code) if user_language_code else detect_timezone_from_language_code("uk")
             
-            settings, created = UserSettings.objects.select_related('selected_book').get_or_create(
+            settings, created = UserSettings.objects.select_related('selected_book').prefetch_related('selected_books').get_or_create(
                 telegram_user=tg_user,
                 defaults={
                     "notification_time": time(8, 0),
@@ -135,11 +143,21 @@ async def cmd_settings_button(message: Message):
                     timezone_str = str(settings.timezone)
             else:
                 timezone_str = "Europe/Kyiv"
-            book_title = settings.selected_book.title if settings.selected_book else t(language, "not_specified")
+            
+            # Перевіряємо чи є обрані книги в ManyToMany полі
+            selected_books = list(settings.selected_books.all())
+            if selected_books:
+                book_titles = "\n".join([f"📖 {book.title}" for book in selected_books])
+            elif settings.selected_book:
+                # Fallback на стару систему
+                book_titles = f"📖 {settings.selected_book.title}"
+            else:
+                book_titles = t(language, "not_specified")
+            
             language_display = dict(LANGUAGE_CHOICES)[settings.language]
             status = t(language, "active") if settings.is_active else t(language, "inactive")
             
-            return notification_time_str, timezone_str, book_title, language_display, status
+            return notification_time_str, timezone_str, book_titles, language_display, status
         
         telegram_user = await sync_to_async(TelegramUser.objects.get)(telegram_id=message.from_user.id)
         notification_time_str, timezone_str, book_title, language_display, status = await sync_to_async(get_settings_data)(telegram_user, language_code)
@@ -275,15 +293,20 @@ async def process_book_language(callback: CallbackQuery, state: FSMContext):
             await state.clear()
             return
         
-        keyboard = await get_books_keyboard(language, book_language=book_lang_code)
+        def get_selected_books(tg_id):
+            telegram_user = TelegramUser.objects.get(telegram_id=tg_id)
+            settings = UserSettings.objects.filter(telegram_user=telegram_user).first()
+            if settings:
+                return list(settings.selected_books.values_list('id', flat=True))
+            return []
+        
+        selected_book_ids = await sync_to_async(get_selected_books)(callback.from_user.id)
+        
+        keyboard = await get_books_keyboard(language, book_language=book_lang_code, selected_book_ids=selected_book_ids)
         await callback.message.edit_text(
             get_text(language, "select_book")
         )
-        await callback.message.answer(
-            get_text(language, "select_book"),
-            reply_markup=keyboard
-        )
-        await state.update_data(book_language=book_lang_code)
+        await state.update_data(book_language=book_lang_code, selected_book_ids=selected_book_ids)
         await state.set_state(SettingsStates.waiting_for_book)
         await callback.answer()
     except Exception as e:
@@ -295,11 +318,50 @@ async def process_book_language(callback: CallbackQuery, state: FSMContext):
 
 @router.callback_query(F.data.startswith("book_"))
 async def process_book(callback: CallbackQuery, state: FSMContext):
+    if callback.data == "books_done":
+        return
+    
     book_id = int(callback.data.split("_")[1])
     language = await get_user_language(callback.from_user.id)
-    book = await sync_to_async(Book.objects.get)(id=book_id)
     
     try:
+        state_data = await state.get_data()
+        selected_book_ids = state_data.get('selected_book_ids', [])
+        book_language = state_data.get('book_language')
+        
+        if book_id in selected_book_ids:
+            selected_book_ids.remove(book_id)
+        else:
+            selected_book_ids.append(book_id)
+        
+        await state.update_data(selected_book_ids=selected_book_ids)
+        
+        keyboard = await get_books_keyboard(language, book_language=book_language, selected_book_ids=selected_book_ids)
+        await callback.message.edit_reply_markup(reply_markup=keyboard)
+        await callback.answer()
+        
+    except Exception as e:
+        await callback.answer(
+            get_text(language, "error_generic", error=str(e)),
+            show_alert=True
+        )
+
+
+@router.callback_query(F.data == "books_done")
+async def process_books_done(callback: CallbackQuery, state: FSMContext):
+    language = await get_user_language(callback.from_user.id)
+    
+    try:
+        state_data = await state.get_data()
+        selected_book_ids = state_data.get('selected_book_ids', [])
+        
+        if not selected_book_ids:
+            await callback.answer(
+                get_text(language, "no_books_selected"),
+                show_alert=True
+            )
+            return
+        
         telegram_user = await sync_to_async(TelegramUser.objects.get)(telegram_id=callback.from_user.id)
         from bot.utils import detect_timezone_from_language_code
         
@@ -315,19 +377,38 @@ async def process_book(callback: CallbackQuery, state: FSMContext):
             }
         )
         
-        settings.selected_book = book
-        if not settings.timezone:
-            settings.timezone = detected_timezone
-        await sync_to_async(settings.save)()
+        def update_selected_books(settings_obj, book_ids):
+            settings_obj.selected_books.set(book_ids)
+            if book_ids:
+                first_book = Book.objects.filter(id__in=book_ids).first()
+                settings_obj.selected_book = first_book
+            if not settings_obj.timezone:
+                settings_obj.timezone = detected_timezone
+            settings_obj.save()
+        
+        await sync_to_async(update_selected_books)(settings, selected_book_ids)
+        
+        def get_book_titles(book_ids):
+            books = Book.objects.filter(id__in=book_ids)
+            return [book.title for book in books]
+        
+        book_titles = await sync_to_async(get_book_titles)(selected_book_ids)
+        books_list = "\n".join([f"📖 {title}" for title in book_titles])
         
         await callback.message.edit_text(
-            get_text(language, "book_selected", book_title=book.title)
+            get_text(language, "books_selected", books_list=books_list)
         )
         await callback.answer()
         await state.clear()
+        
     except TelegramUser.DoesNotExist:
         await callback.answer(
             get_text(language, "error_not_registered"),
+            show_alert=True
+        )
+    except Exception as e:
+        await callback.answer(
+            get_text(language, "error_generic", error=str(e)),
             show_alert=True
         )
 

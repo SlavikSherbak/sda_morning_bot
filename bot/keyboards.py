@@ -61,9 +61,12 @@ def get_cancel_keyboard(language: str = "uk") -> ReplyKeyboardMarkup:
     return keyboard
 
 
-async def get_books_keyboard(language: str = "uk", book_language: str = None) -> InlineKeyboardMarkup:
+async def get_books_keyboard(language: str = "uk", book_language: str = None, selected_book_ids: list = None) -> InlineKeyboardMarkup:
     from asgiref.sync import sync_to_async
     from core.models import Book
+    
+    if selected_book_ids is None:
+        selected_book_ids = []
     
     books_query = Book.objects.filter(is_active=True)
     if book_language:
@@ -73,13 +76,17 @@ async def get_books_keyboard(language: str = "uk", book_language: str = None) ->
     
     keyboard_buttons = []
     for book in books:
+        checkbox = "✅" if book.id in selected_book_ids else "⬜️"
         keyboard_buttons.append([
             InlineKeyboardButton(
-                text=f"📖 {book.title}",
+                text=f"{checkbox} {book.title}",
                 callback_data=f"book_{book.id}"
             )
         ])
     
+    keyboard_buttons.append([
+        InlineKeyboardButton(text=t(language, "done"), callback_data="books_done")
+    ])
     keyboard_buttons.append([
         InlineKeyboardButton(text=t(language, "back"), callback_data="back_to_main")
     ])

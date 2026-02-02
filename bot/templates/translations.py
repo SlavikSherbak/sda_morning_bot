@@ -59,6 +59,7 @@ TRANSLATIONS = {
     "uk": {
         "cancel": "❌ Скасувати",
         "back": "⬅️ Назад",
+        "done": "✅ Готово",
         "main_menu": "🏠 Головне меню",
         "select_action": "Оберіть дію з меню",
         "my_settings": "📋 Мої налаштування",
@@ -84,10 +85,13 @@ TRANSLATIONS = {
         "request_location": "🌍 Для точного визначення вашого часового поясу, будь ласка, надішліть вашу поточну локацію.\n\nАбо ви можете пропустити цей крок - тоді часова зона буде визначена приблизно на основі вашої мови.",
         "location_received": "✅ Часовий пояс синхронізовано: {timezone}",
         "location_skipped": "⏭️ Використано приблизний часовий пояс на основі вашої мови.",
+        "no_books_selected": "⚠️ Будь ласка, оберіть хоча б одну книгу",
+        "books_selected": "✅ Обрані книги:\n\n{books_list}",
     },
     "ru": {
         "cancel": "❌ Отменить",
         "back": "⬅️ Назад",
+        "done": "✅ Готово",
         "main_menu": "🏠 Главное меню",
         "select_action": "Выберите действие из меню",
         "my_settings": "📋 Мои настройки",
@@ -113,10 +117,13 @@ TRANSLATIONS = {
         "request_location": "🌍 Для точного определения вашего часового пояса, пожалуйста, отправьте вашу текущую локацию.\n\nИли вы можете пропустить этот шаг - тогда часовой пояс будет определен приблизительно на основе вашего языка.",
         "location_received": "✅ Часовой пояс синхронизирован: {timezone}",
         "location_skipped": "⏭️ Использован приблизительный часовой пояс на основе вашего языка.",
+        "no_books_selected": "⚠️ Пожалуйста, выберите хотя бы одну книгу",
+        "books_selected": "✅ Выбранные книги:\n\n{books_list}",
     },
     "en": {
         "cancel": "❌ Cancel",
         "back": "⬅️ Back",
+        "done": "✅ Done",
         "main_menu": "🏠 Main menu",
         "select_action": "Select an action from the menu",
         "my_settings": "📋 My Settings",
@@ -142,6 +149,8 @@ TRANSLATIONS = {
         "request_location": "🌍 To accurately determine your timezone, please share your current location.\n\nOr you can skip this step - then the timezone will be determined approximately based on your language.",
         "location_received": "✅ Timezone synchronized: {timezone}",
         "location_skipped": "⏭️ Using approximate timezone based on your language.",
+        "no_books_selected": "⚠️ Please select at least one book",
+        "books_selected": "✅ Selected books:\n\n{books_list}",
     },
 }
 
