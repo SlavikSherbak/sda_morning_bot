@@ -304,7 +304,8 @@ async def process_book_language(callback: CallbackQuery, state: FSMContext):
         
         keyboard = await get_books_keyboard(language, book_language=book_lang_code, selected_book_ids=selected_book_ids)
         await callback.message.edit_text(
-            get_text(language, "select_book")
+            get_text(language, "select_book"),
+            reply_markup=keyboard
         )
         await state.update_data(book_language=book_lang_code, selected_book_ids=selected_book_ids)
         await state.set_state(SettingsStates.waiting_for_book)
@@ -357,7 +358,7 @@ async def process_books_done(callback: CallbackQuery, state: FSMContext):
         
         if not selected_book_ids:
             await callback.answer(
-                get_text(language, "no_books_selected"),
+                t(language, "no_books_selected"),
                 show_alert=True
             )
             return

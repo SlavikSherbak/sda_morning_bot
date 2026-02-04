@@ -51,10 +51,11 @@ class TelegramUserAdmin(admin.ModelAdmin):
 
 @admin.register(UserSettings)
 class UserSettingsAdmin(admin.ModelAdmin):
-    list_display = ("telegram_user", "notification_time", "timezone", "selected_book", "language", "is_active")
-    list_filter = ("language", "is_active", "selected_book", "timezone", "created_at")
+    list_display = ("telegram_user", "notification_time", "timezone", "get_selected_books_display", "language", "is_active")
+    list_filter = ("language", "is_active", "timezone", "created_at")
     search_fields = ("telegram_user__username", "telegram_user__first_name", "telegram_user__telegram_id")
-    readonly_fields = ("created_at", "updated_at")
+    readonly_fields = ("created_at", "updated_at", "selected_books_display")
+    filter_horizontal = ("selected_books",)
     fieldsets = (
         ("User", {
             "fields": ("telegram_user", "is_active")
@@ -63,13 +64,34 @@ class UserSettingsAdmin(admin.ModelAdmin):
             "fields": ("notification_time", "timezone"),
         }),
         ("Content selection", {
-            "fields": ("selected_book", "language")
+            "fields": ("language", "selected_books", "selected_books_display", "selected_book")
         }),
         ("System information", {
             "fields": ("created_at", "updated_at"),
             "classes": ("collapse",)
         }),
     )
+    
+    def get_selected_books_display(self, obj):
+        """Display selected books in list view."""
+        books = obj.selected_books.all()
+        if books.exists():
+            return ", ".join([book.title for book in books[:3]]) + ("..." if books.count() > 3 else "")
+        elif obj.selected_book:
+            return f"{obj.selected_book.title} (legacy)"
+        return "—"
+    get_selected_books_display.short_description = "Selected books"
+    
+    def selected_books_display(self, obj):
+        """Display all selected books in detail view."""
+        books = obj.selected_books.all()
+        if books.exists():
+            book_list = "\n".join([f"• {book.title} ({book.language})" for book in books])
+            return f"{books.count()} books:\n{book_list}"
+        elif obj.selected_book:
+            return f"Legacy: {obj.selected_book.title} ({obj.selected_book.language})"
+        return "No books selected"
+    selected_books_display.short_description = "Selected books (readonly)"
 
 
 @admin.register(DailyInspiration)
